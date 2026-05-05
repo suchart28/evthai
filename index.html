@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive Thailand EV Heatmap</title>
+    <title>Interactive Thailand EV Choropleth Map</title>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,7 +15,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
     <style>
-        body { margin: 0; padding: 0; font-family: 'Chakra Petch', sans-serif; overflow: hidden; }
+        body { margin: 0; padding: 0; font-family: 'Chakra Petch', sans-serif; overflow: hidden; background: #111;}
         #map { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
         
         .control-panel {
@@ -35,10 +35,10 @@
             border: 1px solid rgba(255,255,255,0.1);
         }
 
-        .control-panel h2 { margin-top: 0; font-size: 1.5rem; color: #ff9800; font-weight: 600; }
+        .control-panel h2 { margin-top: 0; font-size: 1.5rem; color: #00e5ff; font-weight: 600; }
 
         .stat-box { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px; }
-        .stat-box h3 { margin: 0; font-size: 2rem; color: #ffeb3b; font-weight: 700;}
+        .stat-box h3 { margin: 0; font-size: 2rem; color: #00e5ff; font-weight: 700;}
         .stat-box p { margin: 5px 0 0 0; font-size: 1rem; opacity: 0.8; }
         
         ul.top-list { list-style: none; padding: 0; margin: 0; }
@@ -63,12 +63,14 @@
             z-index: 20;
             transform: translate(-50%, -100%);
             margin-top: -15px;
-            border: 1px solid #ff9800;
+            border: 1px solid #00e5ff;
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
             font-family: 'Chakra Petch', sans-serif;
+            min-width: 120px;
+            text-align: center;
         }
 
-        #loading { font-weight: bold; color: #00bcd4; text-align: center; padding: 20px 0; font-size: 1.2rem;}
+        #loading { font-weight: bold; color: #00e5ff; text-align: center; padding: 20px 0; font-size: 1.2rem;}
 
         .zoom-controls {
             position: absolute;
@@ -96,7 +98,14 @@
             backdrop-filter: blur(5px);
             transition: all 0.2s;
         }
-        .zoom-btn:hover { background: #ff9800; color: #000; border-color: #ff9800; }
+        .zoom-btn:hover { background: #00e5ff; color: #000; border-color: #00e5ff; }
+        
+        /* สัญลักษณ์บอกสี (Legend) */
+        .legend { margin-top: 15px; font-size: 0.85rem; }
+        .legend-title { margin-bottom: 5px; color: #aaa; text-align: center;}
+        .color-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin-bottom: 5px; }
+        .color-bar div { flex: 1; }
+        .legend-labels { display: flex; justify-content: space-between; color: #888; font-size: 0.75rem; }
     </style>
 </head>
 <body>
@@ -105,14 +114,30 @@
     <div id="tooltip"></div>
 
     <div class="control-panel">
-        <h2>แผนที่ความร้อน EV</h2>
-        <div id="loading">⏳ กำลังดึงข้อมูล...</div>
+        <h2>แผนที่สถิติรถ EV</h2>
+        <div id="loading">⏳ กำลังดึงข้อมูลแผนที่...</div>
         <div id="dashboard" style="display: none;">
             <div class="stat-box">
                 <h3 id="total-ev">0</h3>
                 <p>จำนวนรถรวมทั่วประเทศ</p>
             </div>
-            <h3 style="margin: 10px 0; font-size: 1.1rem; color: #aaa;">Top 10 จังหวัด</h3>
+            
+            <div class="legend">
+                <div class="legend-title">ความหนาแน่น (คัน)</div>
+                <div class="color-bar">
+                    <div style="background: rgb(208, 209, 230);"></div>
+                    <div style="background: rgb(116, 169, 207);"></div>
+                    <div style="background: rgb(5, 112, 176);"></div>
+                    <div style="background: rgb(2, 56, 88);"></div>
+                </div>
+                <div class="legend-labels">
+                    <span>น้อย</span>
+                    <span>ปานกลาง</span>
+                    <span>มาก</span>
+                </div>
+            </div>
+            
+            <h3 style="margin: 20px 0 10px 0; font-size: 1.1rem; color: #aaa; border-top: 1px solid #333; padding-top: 15px;">Top 10 จังหวัด</h3>
             <ul class="top-list" id="top10-list"></ul>
         </div>
     </div>
@@ -123,21 +148,30 @@
     </div>
 
     <script>
-        // เปลี่ยนจาก HexagonLayer เป็น HeatmapLayer และเพิ่ม ScatterplotLayer สำหรับทำ Hover
-        const {DeckGL, HeatmapLayer, TextLayer, ScatterplotLayer} = deck;
+        const {DeckGL, GeoJsonLayer, TextLayer} = deck;
         let deckgl;
         
         let currentViewState = {
             longitude: 100.9925,
             latitude: 15.8700,
             zoom: 5.5,
-            pitch: 0, 
+            pitch: 0, // ปรับให้มองตรงๆ ราบไปกับพื้นผิว
             bearing: 0,
             minZoom: 4,
             maxZoom: 15
         };
 
         const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS5MfesntFAPpBUsYgUtFZaWnDyt4fbZNpKgp5EkHcr-ir3Q_PuV8O3wIjvG5f88Gt_J0YVaQ1fmacL/pub?gid=117754427&single=true&output=csv";
+        
+        // ลิงก์มาตรฐานสำหรับดึงไฟล์ GeoJSON ขอบเขตจังหวัดของประเทศไทย
+        const THAILAND_GEOJSON_URL = "https://raw.githubusercontent.com/apisit/thailand.json/master/thailand.json";
+
+        // ตัวแปรเก็บข้อมูล
+        let geojsonData = null;
+        let csvDataMap = {}; // ใช้ Dictionary เพื่อให้ค้นหาจำนวน EV จากชื่อจังหวัดได้รวดเร็ว
+        let originalData = []; // สำหรับ TextLayer แสดงตัวเลขบนแผนที่
+        let isGeoJsonReady = false;
+        let isCsvReady = false;
 
         function initMap() {
             deckgl = new DeckGL({
@@ -150,143 +184,175 @@
                 },
                 layers: []
             });
-            fetchDataFromGoogleSheets();
+            
+            // โหลดข้อมูลทั้ง 2 แหล่งพร้อมกัน
+            fetchGeoJSON();
+            fetchCSV();
         }
 
         function zoomMap(step) {
             const newZoom = Math.min(currentViewState.maxZoom, Math.max(currentViewState.minZoom, currentViewState.zoom + step));
             deckgl.setProps({
-                viewState: {
-                    ...currentViewState,
-                    zoom: newZoom,
-                    transitionDuration: 300 
-                }
+                viewState: { ...currentViewState, zoom: newZoom, transitionDuration: 300 }
             });
             currentViewState.zoom = newZoom;
         }
 
-        function fetchDataFromGoogleSheets() {
+        async function fetchGeoJSON() {
+            try {
+                const response = await fetch(THAILAND_GEOJSON_URL);
+                geojsonData = await response.json();
+                isGeoJsonReady = true;
+                checkAndRender();
+            } catch (error) {
+                document.getElementById('loading').innerText = "❌ โหลดข้อมูลแผนที่ล้มเหลว";
+                console.error("GeoJSON Error:", error);
+            }
+        }
+
+        function fetchCSV() {
             Papa.parse(GOOGLE_SHEET_CSV_URL, {
                 download: true,
                 header: true,
                 skipEmptyLines: true,
                 complete: function(results) {
-                    document.getElementById('loading').style.display = 'none';
-                    updateMapAndDashboard(results.data);
+                    let totalEV = 0;
+                    
+                    results.data.forEach(row => {
+                        const count = parseInt(row.EV_Count);
+                        const lng = parseFloat(row.Lng);
+                        const lat = parseFloat(row.Lat);
+                        const provTH = row.Province_TH ? row.Province_TH.trim() : "";
+                        const provEN = row.Province ? row.Province.trim() : "";
+
+                        if (!isNaN(count)) {
+                            totalEV += count;
+                            
+                            // จัดเก็บข้อมูลลง Dictionary เผื่อกรณีชื่อใน GeoJSON ไม่ตรงกัน 100%
+                            csvDataMap[provTH] = count;
+                            csvDataMap[provEN] = count;
+                            csvDataMap['จ.' + provTH] = count;
+                            csvDataMap['จังหวัด' + provTH] = count;
+                            if (provTH === 'กรุงเทพมหานคร') csvDataMap['กรุงเทพมหานครฯ'] = count;
+
+                            if (!isNaN(lng) && !isNaN(lat)) {
+                                originalData.push({
+                                    province: provTH || provEN,
+                                    position: [lng, lat],
+                                    weight: count
+                                });
+                            }
+                        }
+                    });
+
+                    document.getElementById('total-ev').innerText = totalEV.toLocaleString();
+
+                    // อัปเดต Dashboard Top 10
+                    const top10 = [...originalData].sort((a, b) => b.weight - a.weight).slice(0, 10);
+                    const top10List = document.getElementById('top10-list');
+                    top10List.innerHTML = ''; 
+                    top10.forEach((item, index) => {
+                        const li = document.createElement('li');
+                        const color = index < 3 ? '#00e5ff' : '#fff';
+                        li.innerHTML = `<span style="color: ${color};">${index + 1}. ${item.province}</span> <strong>${item.weight.toLocaleString()}</strong>`;
+                        top10List.appendChild(li);
+                    });
+
+                    isCsvReady = true;
+                    checkAndRender();
                 }
             });
         }
 
-        function generateClusterPoints(centerLng, centerLat, evCount, provinceName) {
-            const points = [];
-            const numPoints = Math.min(Math.ceil(evCount / 50), 2000); 
-            
-            for (let i = 0; i < numPoints; i++) {
-                const angle = Math.random() * Math.PI * 2;
-                const radius = Math.pow(Math.random(), 2) * 0.3; 
-                points.push({
-                    position: [centerLng + radius * Math.cos(angle), centerLat + radius * Math.sin(angle)],
-                    province: provinceName
-                });
-            }
-            return points;
-        }
-
-        function updateMapAndDashboard(data) {
-            let totalEV = 0;
-            const originalData = []; 
-            const scatterPoints = []; 
-
-            data.forEach(row => {
-                const count = parseInt(row.EV_Count);
-                const lng = parseFloat(row.Lng);
-                const lat = parseFloat(row.Lat);
-                const provinceName = row.Province_TH || row.Province;
-
-                if (!isNaN(count) && !isNaN(lng) && !isNaN(lat)) {
-                    totalEV += count;
-                    originalData.push({ province: provinceName, position: [lng, lat], weight: count });
-                    const clustered = generateClusterPoints(lng, lat, count, provinceName);
-                    scatterPoints.push(...clustered);
-                }
-            });
-
-            document.getElementById('dashboard').style.display = 'block';
-            document.getElementById('total-ev').innerText = totalEV.toLocaleString();
-
-            const top10 = [...originalData].sort((a, b) => b.weight - a.weight).slice(0, 10);
-            const top10List = document.getElementById('top10-list');
-            top10List.innerHTML = ''; 
-            top10.forEach((item, index) => {
-                const li = document.createElement('li');
-                const color = index < 3 ? '#ffeb3b' : '#fff';
-                li.innerHTML = `<span style="color: ${color};">${index + 1}. ${item.province}</span> <strong>${item.weight.toLocaleString()}</strong>`;
-                top10List.appendChild(li);
-            });
-
-            // 1. เลเยอร์ Heatmap หลัก
-            const heatmapLayer = new HeatmapLayer({
-                id: 'ev-heatmap-layer',
-                data: scatterPoints,
-                getPosition: d => d.position,
-                getWeight: d => 1,
-                radiusPixels: 40, // รัศมีความเบลอของขอบเขตความร้อน
-                intensity: 1.2,   // ความสว่างของจุดศูนย์กลาง
-                threshold: 0.03,
-                colorRange: [
-                    [25, 25, 112, 100],   // น้ำเงิน (หนาแน่นน้อย)
-                    [0, 191, 255, 200],   // ฟ้า
-                    [50, 205, 50, 255],   // เขียว
-                    [255, 215, 0, 255],   // เหลือง
-                    [255, 69, 0, 255],    // ส้มแดง
-                    [220, 20, 60, 255]    // แดงเข้ม (หนาแน่นสูงมาก)
-                ]
-            });
-
-            // 2. เลเยอร์โปร่งใสสำหรับรับ Event การชี้เมาส์ (Hover)
-            const hitAreaLayer = new ScatterplotLayer({
-                id: 'hit-area-layer',
-                data: originalData,
-                pickable: true,
-                opacity: 0, // โปร่งใส 100% มองไม่เห็นแต่สัมผัสได้
-                stroked: false,
-                filled: true,
-                radiusScale: 1,
-                radiusMinPixels: 25, // ขนาดพื้นที่รับสัมผัสเมาส์รอบตัวอักษร
-                getPosition: d => d.position,
-                onHover: ({object, x, y}) => {
-                    const tooltip = document.getElementById('tooltip');
-                    if (object) {
-                        tooltip.style.display = 'block';
-                        tooltip.style.left = x + 'px';
-                        tooltip.style.top = y + 'px';
-                        tooltip.innerHTML = `<strong>จังหวัด${object.province}</strong><br/>รถ EV: ${object.weight.toLocaleString()} คัน`;
-                    } else {
-                        tooltip.style.display = 'none';
+        // ฟังก์ชันสำหรับค้นหาว่า Polygon นี้มีจำนวนรถ EV เท่าไหร่
+        function getEVCountFromFeature(feature) {
+            if (!feature.properties) return 0;
+            // วนหาชื่อจังหวัดจาก property ต่างๆ ในไฟล์ GeoJSON
+            const propsValues = Object.values(feature.properties);
+            for (let val of propsValues) {
+                if (typeof val === 'string') {
+                    const name = val.trim();
+                    // ตรวจสอบแบบเจาะจง
+                    if (csvDataMap[name] !== undefined) return csvDataMap[name];
+                    // ตรวจสอบแบบมีคำใบ้ (substring)
+                    for (let key in csvDataMap) {
+                        if (name.includes(key)) return csvDataMap[key];
                     }
                 }
-            });
+            }
+            return 0;
+        }
 
-            // 3. เลเยอร์ป้ายชื่อจังหวัดและตัวเลข
-            const textLayer = new TextLayer({
-                id: 'text-layer',
-                data: originalData,
-                pickable: false, // ปิดการสัมผัสที่ตัวอักษรโดยตรง (ให้ hitAreaLayer จัดการแทน)
-                getPosition: d => d.position,
-                getText: d => `${d.province}\n${d.weight.toLocaleString()}`,
-                getSize: 14,
-                getColor: [255, 255, 255, 255],
-                getAngle: 0,
-                getTextAnchor: 'middle',
-                getAlignmentBaseline: 'center',
-                fontFamily: "'Chakra Petch', sans-serif",
-                fontWeight: 'bold',
-                getPixelOffset: [0, 0],
-                characterSet: 'auto'
-            });
+        // ฟังก์ชันคำนวณสี (ยิ่งตัวเลขมาก สียิ่งเข้ม)
+        function getColorByEVCount(evCount) {
+            if (evCount === 0) return [30, 30, 30, 150]; // ไม่มีข้อมูล = สีดำโปร่งแสง
+            
+            // ชุดสี Tech Blue (อ่อน -> เข้มจัด)
+            if (evCount >= 20000) return [2, 56, 88, 230];   // เข้มมาก (Dark Blue)
+            if (evCount >= 10000) return [4, 90, 141, 230]; 
+            if (evCount >= 5000)  return [5, 112, 176, 230];
+            if (evCount >= 2000)  return [54, 144, 192, 230];
+            if (evCount >= 1000)  return [116, 169, 207, 230];
+            if (evCount >= 500)   return [166, 189, 219, 230];
+            return [208, 209, 230, 230];                     // อ่อนมาก (Lightest Blue)
+        }
 
-            // แสดงผลทั้ง 3 เลเยอร์ทับซ้อนกัน
-            deckgl.setProps({ layers: [heatmapLayer, hitAreaLayer, textLayer] });
+        // เช็คว่าโหลดข้อมูลครบทั้งแผนที่และ CSV หรือยัง ก่อนทำการวาด
+        function checkAndRender() {
+            if (isGeoJsonReady && isCsvReady) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'block';
+
+                // 1. เลเยอร์แผนที่ระบายสีพื้น (Choropleth Layer)
+                const choroplethLayer = new GeoJsonLayer({
+                    id: 'ev-choropleth-layer',
+                    data: geojsonData,
+                    pickable: true,
+                    stroked: true,
+                    filled: true,
+                    lineWidthMinPixels: 1,
+                    getLineColor: [255, 255, 255, 60], // สีเส้นขอบจังหวัดขาวจางๆ
+                    getFillColor: d => {
+                        const evCount = getEVCountFromFeature(d);
+                        return getColorByEVCount(evCount);
+                    },
+                    onHover: ({object, x, y}) => {
+                        const tooltip = document.getElementById('tooltip');
+                        if (object) {
+                            const evCount = getEVCountFromFeature(object);
+                            // พยายามดึงชื่อจังหวัดออกมาแสดง
+                            let provName = object.properties.name || object.properties.PROV_NAMT || object.properties.NAME_1 || "พื้นที่จังหวัด";
+                            
+                            tooltip.style.display = 'block';
+                            tooltip.style.left = x + 'px';
+                            tooltip.style.top = y + 'px';
+                            tooltip.innerHTML = `<span style="color:#00e5ff">${provName}</span><br/><strong>${evCount.toLocaleString()}</strong> คัน`;
+                        } else {
+                            tooltip.style.display = 'none';
+                        }
+                    }
+                });
+
+                // 2. เลเยอร์ป้ายชื่อจังหวัดและตัวเลข (ซ้อนทับด้านบนสุด)
+                const textLayer = new TextLayer({
+                    id: 'text-layer',
+                    data: originalData,
+                    pickable: false,
+                    getPosition: d => d.position,
+                    getText: d => `${d.province}\n${d.weight.toLocaleString()}`,
+                    getSize: 13,
+                    getColor: [255, 255, 255, 255],
+                    getAngle: 0,
+                    getTextAnchor: 'middle',
+                    getAlignmentBaseline: 'center',
+                    fontFamily: "'Chakra Petch', sans-serif",
+                    fontWeight: 'bold',
+                    getPixelOffset: [0, 0],
+                    characterSet: 'auto'
+                });
+
+                deckgl.setProps({ layers: [choroplethLayer, textLayer] });
+            }
         }
 
         window.onload = initMap;
