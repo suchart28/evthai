@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interactive Thailand EV Map</title>
     
-    <!-- 1. นำเข้าฟอนต์ Chakra Petch จาก Google Fonts -->
+    <!-- นำเข้าฟอนต์ Chakra Petch จาก Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap" rel="stylesheet">
@@ -15,14 +15,15 @@
     <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
     <script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
     
-    <!-- PapaParse -->
+    <!-- PapaParse สำหรับอ่านไฟล์ CSV จาก Google Sheets -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
     <style>
-        /* เปลี่ยนฟอนต์หลักของทั้งเว็บไซต์เป็น Chakra Petch */
+        /* ตั้งค่าฟอนต์หลัก */
         body { margin: 0; padding: 0; font-family: 'Chakra Petch', sans-serif; overflow: hidden; }
         #map { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
         
+        /* แผงควบคุม */
         .control-panel {
             position: absolute;
             top: 20px;
@@ -33,8 +34,8 @@
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             width: 320px;
-            max-height: 90vh; /* ป้องกันกล่องทะลุจอถ้า Top 10 ยาวเกินไป */
-            overflow-y: auto; /* ให้ไถหน้าจอในกล่องนี้ได้ */
+            max-height: 90vh;
+            overflow-y: auto;
             z-index: 10;
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255,255,255,0.1);
@@ -56,6 +57,7 @@
         }
         ul.top-list li:last-child { border-bottom: none; }
         
+        /* ป้ายกำกับตอน Hover */
         #tooltip {
             position: absolute;
             background: rgba(0, 0, 0, 0.9);
@@ -75,7 +77,7 @@
 
         #loading { font-weight: bold; color: #00bcd4; text-align: center; padding: 20px 0; font-size: 1.2rem;}
 
-        /* 2. สไตล์สำหรับปุ่ม Zoom In / Zoom Out */
+        /* ปุ่ม Zoom */
         .zoom-controls {
             position: absolute;
             bottom: 30px;
@@ -110,7 +112,6 @@
     <div id="map"></div>
     <div id="tooltip"></div>
 
-    <!-- แผงควบคุมซ้ายมือ -->
     <div class="control-panel">
         <h2>🚗 แผนที่ความหนาแน่น EV</h2>
         <div id="loading">⏳ กำลังดึงข้อมูล...</div>
@@ -119,13 +120,12 @@
                 <h3 id="total-ev">0</h3>
                 <p>จำนวนรถรวมทั่วประเทศ</p>
             </div>
-            <!-- 3. เปลี่ยนหัวข้อเป็น Top 10 -->
             <h3 style="margin: 10px 0; font-size: 1.1rem; color: #aaa;">Top 10 จังหวัด</h3>
             <ul class="top-list" id="top10-list"></ul>
         </div>
     </div>
 
-    <!-- 2. เพิ่มปุ่ม Zoom -->
+    <!-- ปุ่มควบคุมซูมแผนที่ -->
     <div class="zoom-controls">
         <button class="zoom-btn" onclick="zoomMap(1)">+</button>
         <button class="zoom-btn" onclick="zoomMap(-1)">−</button>
@@ -135,7 +135,7 @@
         const {DeckGL, HexagonLayer, TextLayer} = deck;
         let deckgl;
         
-        // ตัวแปรเก็บค่ามุมมองปัจจุบันของแผนที่
+        // ตัวแปรเก็บค่ามุมมองปัจจุบัน
         let currentViewState = {
             longitude: 100.9925,
             latitude: 15.8700,
@@ -146,6 +146,7 @@
             maxZoom: 15
         };
 
+        // ลิงก์จาก Google Sheets 
         const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS5MfesntFAPpBUsYgUtFZaWnDyt4fbZNpKgp5EkHcr-ir3Q_PuV8O3wIjvG5f88Gt_J0YVaQ1fmacL/pub?gid=117754427&single=true&output=csv";
 
         function initMap() {
@@ -153,28 +154,29 @@
                 container: 'map',
                 mapStyle: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
                 initialViewState: currentViewState,
-                controller: true, // เปิดให้ใช้เมาส์ลากและหมุนได้อิสระ (กดคลิกขวาค้างเพื่อปรับแกน 3D)
+                controller: true, 
                 onViewStateChange: ({viewState}) => {
-                    currentViewState = viewState; // อัปเดตค่าเสมอเมื่อมีการเลื่อนแผนที่
+                    currentViewState = viewState; 
                 },
                 layers: []
             });
             fetchDataFromGoogleSheets();
         }
 
-        // ฟังก์ชันสำหรับควบคุมปุ่ม Zoom
+        // ระบบ Zoom
         function zoomMap(step) {
             const newZoom = Math.min(currentViewState.maxZoom, Math.max(currentViewState.minZoom, currentViewState.zoom + step));
             deckgl.setProps({
                 viewState: {
                     ...currentViewState,
                     zoom: newZoom,
-                    transitionDuration: 300 // เพิ่มแอนิเมชันให้การซูมนุ่มนวลขึ้น
+                    transitionDuration: 300 
                 }
             });
             currentViewState.zoom = newZoom;
         }
 
+        // ดึงข้อมูลผ่าน PapaParse
         function fetchDataFromGoogleSheets() {
             Papa.parse(GOOGLE_SHEET_CSV_URL, {
                 download: true,
@@ -187,6 +189,7 @@
             });
         }
 
+        // จำลองจุดข้อมูลแบบ Gaussian 
         function generateClusterPoints(centerLng, centerLat, evCount, provinceName) {
             const points = [];
             const numPoints = Math.min(Math.ceil(evCount / 50), 2000); 
@@ -224,13 +227,11 @@
             document.getElementById('dashboard').style.display = 'block';
             document.getElementById('total-ev').innerText = totalEV.toLocaleString();
 
-            // 3. ปรับดึงข้อมูลเป็น Top 10
             const top10 = [...originalData].sort((a, b) => b.weight - a.weight).slice(0, 10);
             const top10List = document.getElementById('top10-list');
             top10List.innerHTML = ''; 
             top10.forEach((item, index) => {
                 const li = document.createElement('li');
-                // ไฮไลต์ 3 อันดับแรกให้สีเด่นขึ้นนิดหน่อย
                 const color = index < 3 ? '#00bcd4' : '#fff';
                 li.innerHTML = `<span style="color: ${color};">${index + 1}. ${item.province}</span> <strong>${item.weight.toLocaleString()}</strong>`;
                 top10List.appendChild(li);
@@ -254,11 +255,11 @@
                 ],
                 onHover: ({object, x, y}) => {
                     const tooltip = document.getElementById('tooltip');
-                    if (object && object.points.length > 0) {
+                    if (object && object.points && object.points.length > 0) {
                         tooltip.style.display = 'block';
                         tooltip.style.left = x + 'px';
                         tooltip.style.top = y + 'px';
-                        const prov = object.points[0].source.province;
+                        const prov = object.points[0].province;
                         const density = object.points.length * 50; 
                         tooltip.innerHTML = `<strong>พื้นที่จังหวัด ${prov}</strong><br/>ประมาณการในรัศมีนี้: ~${density.toLocaleString()} คัน`;
                     } else {
@@ -278,10 +279,10 @@
                 getAngle: 0,
                 getTextAnchor: 'middle',
                 getAlignmentBaseline: 'center',
-                // 1. นำฟอนต์ Chakra Petch มาใช้กับป้ายชื่อบนแผนที่ด้วย
                 fontFamily: "'Chakra Petch', sans-serif",
                 fontWeight: 'bold',
-                getPixelOffset: [0, -35] 
+                getPixelOffset: [0, -35],
+                characterSet: 'auto' // บังคับสร้าง Texture อักษรไทยป้องกันบั๊กกล่องสี่เหลี่ยม
             });
 
             deckgl.setProps({ layers: [hexLayer, textLayer] });
