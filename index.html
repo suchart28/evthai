@@ -3,71 +3,68 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Thailand EV Map (Google Sheets Sync)</title>
+    <title>Interactive Thailand EV Map</title>
     
     <!-- MapLibre & Deck.gl -->
     <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet" />
     <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
     <script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
     
-    <!-- PapaParse สำหรับอ่านไฟล์ CSV จาก URL -->
+    <!-- PapaParse -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
     <style>
         body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; overflow: hidden; }
         #map { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
         
-        /* สไตล์กล่องควบคุม */
         .control-panel {
             position: absolute;
             top: 20px;
             left: 20px;
-            background: rgba(255, 255, 255, 0.95);
+            background: rgba(20, 20, 20, 0.85); /* ปรับให้เข้ากับ Dark Mode */
+            color: #fff;
             padding: 20px;
             border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             width: 320px;
             z-index: 10;
-            backdrop-filter: blur(5px);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
         }
 
-        .control-panel h2 { margin-top: 0; font-size: 1.4rem; color: #1a73e8; }
+        .control-panel h2 { margin-top: 0; font-size: 1.4rem; color: #4CAF50; }
 
-        .stat-box { background: #333; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px; }
-        .stat-box h3 { margin: 0; font-size: 1.8rem; color: #4CAF50;}
-        .stat-box p { margin: 5px 0 0 0; font-size: 0.9rem; opacity: 0.9; }
+        .stat-box { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px; }
+        .stat-box h3 { margin: 0; font-size: 1.8rem; color: #00bcd4;}
+        .stat-box p { margin: 5px 0 0 0; font-size: 0.9rem; opacity: 0.8; }
         
         ul.top-list { list-style: none; padding: 0; margin: 0; }
         ul.top-list li {
             display: flex;
             justify-content: space-between;
             padding: 8px 0;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
             font-size: 0.95rem;
         }
         ul.top-list li:last-child { border-bottom: none; }
         
         #tooltip {
             position: absolute;
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(0, 0, 0, 0.9);
             color: #fff;
-            padding: 8px 12px;
-            border-radius: 4px;
-            font-size: 12px;
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-size: 13px;
             pointer-events: none;
             display: none;
             z-index: 20;
             transform: translate(-50%, -100%);
-            margin-top: -10px;
+            margin-top: -15px;
+            border: 1px solid #4CAF50;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
         }
 
-        /* อนิเมชันโหลดข้อมูล */
-        #loading {
-            font-weight: bold;
-            color: #ff9800;
-            text-align: center;
-            padding: 20px 0;
-        }
+        #loading { font-weight: bold; color: #00bcd4; text-align: center; padding: 20px 0; }
     </style>
 </head>
 <body>
@@ -76,29 +73,24 @@
     <div id="tooltip"></div>
 
     <div class="control-panel">
-        <h2>🚗 สถิติรถ EV ประเทศไทย</h2>
-        
-        <div id="loading">⏳ กำลังดึงข้อมูลจาก Google Sheets...</div>
-
+        <h2>🚗 แผนที่ความหนาแน่น EV</h2>
+        <div id="loading">⏳ กำลังดึงข้อมูล...</div>
         <div id="dashboard" style="display: none;">
             <div class="stat-box">
                 <h3 id="total-ev">0</h3>
                 <p>จำนวนรถรวมทั่วประเทศ</p>
             </div>
-            
-            <h3 style="margin: 10px 0; font-size: 1rem;">Top 5 จังหวัด (ยอดจดทะเบียนสูงสุด)</h3>
+            <h3 style="margin: 10px 0; font-size: 1rem; color: #aaa;">Top 5 จังหวัด</h3>
             <ul class="top-list" id="top5-list"></ul>
         </div>
     </div>
 
     <script>
-        const {DeckGL, HexagonLayer} = deck;
+        const {DeckGL, HexagonLayer, TextLayer} = deck;
         let deckgl;
 
-        // URL ของ Google Sheets ที่ Publish เป็น CSV
         const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS5MfesntFAPpBUsYgUtFZaWnDyt4fbZNpKgp5EkHcr-ir3Q_PuV8O3wIjvG5f88Gt_J0YVaQ1fmacL/pub?gid=117754427&single=true&output=csv";
 
-        // เริ่มต้นแผนที่เปล่าๆ
         function initMap() {
             deckgl = new DeckGL({
                 container: 'map',
@@ -106,116 +98,133 @@
                 initialViewState: {
                     longitude: 100.9925,
                     latitude: 15.8700,
-                    zoom: 5.2,
-                    pitch: 45,
+                    zoom: 5.5,
+                    pitch: 50,
                     bearing: 0
                 },
                 controller: true,
                 layers: []
             });
-
-            // พอโหลดแผนที่เสร็จ ให้เริ่มดึงข้อมูลจาก Google Sheets ทันที
             fetchDataFromGoogleSheets();
         }
 
         function fetchDataFromGoogleSheets() {
             Papa.parse(GOOGLE_SHEET_CSV_URL, {
-                download: true, // สั่งให้ดาวน์โหลดจาก URL
-                header: true,   // ให้อ่านแถวแรกเป็นชื่อคอลัมน์
+                download: true,
+                header: true,
                 skipEmptyLines: true,
                 complete: function(results) {
-                    console.log("ดึงข้อมูลสำเร็จ:", results.data);
-                    
-                    // ปิดข้อความโหลดข้อมูล
                     document.getElementById('loading').style.display = 'none';
-                    
                     updateMapAndDashboard(results.data);
-                },
-                error: function(err) {
-                    document.getElementById('loading').innerText = "❌ เกิดข้อผิดพลาดในการดึงข้อมูล";
-                    document.getElementById('loading').style.color = "red";
-                    console.error("PapaParse Error:", err);
                 }
             });
         }
 
-        // ฟังก์ชันประมวลผลข้อมูลและวาดลงแผนที่
+        // ฟังก์ชันสร้างจุดกระจายตัวแบบ Gaussian/Radial เพื่อให้เกิด Heatmap Effect ตรงกลาง
+        function generateClusterPoints(centerLng, centerLat, evCount, provinceName) {
+            const points = [];
+            // ลดสเกลจำนวนจุดลงเพื่อไม่ให้เบราว์เซอร์ทำงานหนักเกินไป (1 จุด = รถ EV 50 คัน)
+            const numPoints = Math.min(Math.ceil(evCount / 50), 2000); 
+            
+            for (let i = 0; i < numPoints; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                // ใช้ Math.random() ยกกำลังเพื่อดึงจุดให้กระจุกตัวตรงกลาง (รัศมีประมาณ 0.3 องศา หรือ ~30km)
+                const radius = Math.pow(Math.random(), 2) * 0.3; 
+                points.push({
+                    position: [centerLng + radius * Math.cos(angle), centerLat + radius * Math.sin(angle)],
+                    province: provinceName
+                });
+            }
+            return points;
+        }
+
         function updateMapAndDashboard(data) {
             let totalEV = 0;
-            const mapData = [];
+            const originalData = []; // สำหรับ TextLayer และ Dashboard
+            const scatterPoints = []; // สำหรับ HexagonLayer
 
-            // ทำความสะอาดและแปลงข้อมูล
             data.forEach(row => {
                 const count = parseInt(row.EV_Count);
                 const lng = parseFloat(row.Lng);
                 const lat = parseFloat(row.Lat);
-                
-                // ใช้ชื่อจังหวัดภาษาไทย (ถ้ามี) ถ้าไม่มีให้ใช้ภาษาอังกฤษ
                 const provinceName = row.Province_TH || row.Province;
 
                 if (!isNaN(count) && !isNaN(lng) && !isNaN(lat)) {
                     totalEV += count;
-                    mapData.push({
-                        province: provinceName,
-                        position: [lng, lat],
-                        weight: count
-                    });
+                    originalData.push({ province: provinceName, position: [lng, lat], weight: count });
+                    
+                    // สร้างจุดจำลองกระจายรอบๆ เพื่อสร้าง Heatmap
+                    const clustered = generateClusterPoints(lng, lat, count, provinceName);
+                    scatterPoints.push(...clustered);
                 }
             });
 
-            // อัปเดต Overlay Dashboard
             document.getElementById('dashboard').style.display = 'block';
             document.getElementById('total-ev').innerText = totalEV.toLocaleString();
 
-            // จัดเรียงหา Top 5
-            const top5 = [...mapData].sort((a, b) => b.weight - a.weight).slice(0, 5);
+            const top5 = [...originalData].sort((a, b) => b.weight - a.weight).slice(0, 5);
             const top5List = document.getElementById('top5-list');
             top5List.innerHTML = ''; 
-            
             top5.forEach((item, index) => {
                 const li = document.createElement('li');
                 li.innerHTML = `<span>${index + 1}. ${item.province}</span> <strong>${item.weight.toLocaleString()}</strong>`;
                 top5List.appendChild(li);
             });
 
-            // สร้าง Hexagon Layer
+            // 1. เลเยอร์ Hexagon (ปรับรัศมีเล็กลงเพื่อให้ดูละเอียดขึ้น)
             const hexLayer = new HexagonLayer({
                 id: 'ev-hexagon-layer',
-                data: mapData,
+                data: scatterPoints,
                 pickable: true,
                 extruded: true,
-                radius: 25000, 
-                elevationScale: 100, 
+                radius: 8000, // ปรับให้เล็กลง (8 กิโลเมตร) 
+                elevationScale: 50,
                 getPosition: d => d.position,
-                getColorWeight: d => d.weight,
-                getElevationWeight: d => d.weight,
                 colorRange: [
-                    [255, 255, 178],
-                    [254, 204, 92],
-                    [253, 141, 60],
-                    [240, 59, 32],
-                    [189, 0, 38]
+                    [20, 40, 80],
+                    [34, 94, 168],
+                    [65, 182, 196],
+                    [161, 218, 180],
+                    [255, 255, 204],
+                    [255, 100, 50] // สียอดแหลมสุด (หนาแน่นสุด)
                 ],
                 onHover: ({object, x, y}) => {
                     const tooltip = document.getElementById('tooltip');
-                    if (object) {
+                    if (object && object.points.length > 0) {
                         tooltip.style.display = 'block';
                         tooltip.style.left = x + 'px';
                         tooltip.style.top = y + 'px';
-                        // ดึงชื่อจังหวัดจากข้อมูลที่อยู่ใน Hexagon นัั้นๆ (จุดแรก)
                         const prov = object.points[0].source.province;
-                        tooltip.innerHTML = `<strong>${prov}</strong><br/>รถ EV: ${object.colorValue.toLocaleString()} คัน`;
+                        // คำนวณความหนาแน่นใน Hexagon ช่องนี้
+                        const density = object.points.length * 50; 
+                        tooltip.innerHTML = `<strong>พื้นที่จังหวัด ${prov}</strong><br/>ประมาณการในรัศมีนี้: ~${density.toLocaleString()} คัน`;
                     } else {
                         tooltip.style.display = 'none';
                     }
                 }
             });
 
-            // สั่งอัปเดตเลเยอร์บน Deck.gl
-            deckgl.setProps({ layers: [hexLayer] });
+            // 2. เลเยอร์ Text (ป้ายกำกับชื่อจังหวัดและจำนวน)
+            const textLayer = new TextLayer({
+                id: 'text-layer',
+                data: originalData,
+                pickable: false,
+                getPosition: d => d.position,
+                getText: d => `${d.province}\n${d.weight.toLocaleString()}`,
+                getSize: 14,
+                getColor: [255, 255, 255, 220],
+                getAngle: 0,
+                getTextAnchor: 'middle',
+                getAlignmentBaseline: 'center',
+                fontFamily: 'Tahoma, sans-serif',
+                fontWeight: 'bold',
+                // ดันข้อความให้ลอยขึ้นมาเหนือแผนที่ 3D
+                getPixelOffset: [0, -30] 
+            });
+
+            deckgl.setProps({ layers: [hexLayer, textLayer] });
         }
 
-        // เรียกใช้งานแผนที่ตอนโหลดเว็บเสร็จ
         window.onload = initMap;
 
     </script>
