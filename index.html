@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interactive Thailand EV Map</title>
     
+    <!-- 1. นำเข้าฟอนต์ Chakra Petch จาก Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap" rel="stylesheet">
+
     <!-- MapLibre & Deck.gl -->
     <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet" />
     <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
@@ -14,29 +19,32 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
     <style>
-        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; overflow: hidden; }
+        /* เปลี่ยนฟอนต์หลักของทั้งเว็บไซต์เป็น Chakra Petch */
+        body { margin: 0; padding: 0; font-family: 'Chakra Petch', sans-serif; overflow: hidden; }
         #map { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
         
         .control-panel {
             position: absolute;
             top: 20px;
             left: 20px;
-            background: rgba(20, 20, 20, 0.85); /* ปรับให้เข้ากับ Dark Mode */
+            background: rgba(20, 20, 20, 0.85);
             color: #fff;
             padding: 20px;
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             width: 320px;
+            max-height: 90vh; /* ป้องกันกล่องทะลุจอถ้า Top 10 ยาวเกินไป */
+            overflow-y: auto; /* ให้ไถหน้าจอในกล่องนี้ได้ */
             z-index: 10;
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255,255,255,0.1);
         }
 
-        .control-panel h2 { margin-top: 0; font-size: 1.4rem; color: #4CAF50; }
+        .control-panel h2 { margin-top: 0; font-size: 1.5rem; color: #4CAF50; font-weight: 600; }
 
         .stat-box { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px; }
-        .stat-box h3 { margin: 0; font-size: 1.8rem; color: #00bcd4;}
-        .stat-box p { margin: 5px 0 0 0; font-size: 0.9rem; opacity: 0.8; }
+        .stat-box h3 { margin: 0; font-size: 2rem; color: #00bcd4; font-weight: 700;}
+        .stat-box p { margin: 5px 0 0 0; font-size: 1rem; opacity: 0.8; }
         
         ul.top-list { list-style: none; padding: 0; margin: 0; }
         ul.top-list li {
@@ -44,7 +52,7 @@
             justify-content: space-between;
             padding: 8px 0;
             border-bottom: 1px solid rgba(255,255,255,0.1);
-            font-size: 0.95rem;
+            font-size: 1rem;
         }
         ul.top-list li:last-child { border-bottom: none; }
         
@@ -54,7 +62,7 @@
             color: #fff;
             padding: 10px 15px;
             border-radius: 6px;
-            font-size: 13px;
+            font-size: 14px;
             pointer-events: none;
             display: none;
             z-index: 20;
@@ -62,9 +70,39 @@
             margin-top: -15px;
             border: 1px solid #4CAF50;
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            font-family: 'Chakra Petch', sans-serif;
         }
 
-        #loading { font-weight: bold; color: #00bcd4; text-align: center; padding: 20px 0; }
+        #loading { font-weight: bold; color: #00bcd4; text-align: center; padding: 20px 0; font-size: 1.2rem;}
+
+        /* 2. สไตล์สำหรับปุ่ม Zoom In / Zoom Out */
+        .zoom-controls {
+            position: absolute;
+            bottom: 30px;
+            right: 20px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .zoom-btn {
+            background: rgba(20, 20, 20, 0.85);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.2);
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            font-size: 24px;
+            font-family: monospace;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(5px);
+            transition: all 0.2s;
+        }
+        .zoom-btn:hover { background: #00bcd4; color: #000; border-color: #00bcd4; }
     </style>
 </head>
 <body>
@@ -72,6 +110,7 @@
     <div id="map"></div>
     <div id="tooltip"></div>
 
+    <!-- แผงควบคุมซ้ายมือ -->
     <div class="control-panel">
         <h2>🚗 แผนที่ความหนาแน่น EV</h2>
         <div id="loading">⏳ กำลังดึงข้อมูล...</div>
@@ -80,14 +119,32 @@
                 <h3 id="total-ev">0</h3>
                 <p>จำนวนรถรวมทั่วประเทศ</p>
             </div>
-            <h3 style="margin: 10px 0; font-size: 1rem; color: #aaa;">Top 5 จังหวัด</h3>
-            <ul class="top-list" id="top5-list"></ul>
+            <!-- 3. เปลี่ยนหัวข้อเป็น Top 10 -->
+            <h3 style="margin: 10px 0; font-size: 1.1rem; color: #aaa;">Top 10 จังหวัด</h3>
+            <ul class="top-list" id="top10-list"></ul>
         </div>
+    </div>
+
+    <!-- 2. เพิ่มปุ่ม Zoom -->
+    <div class="zoom-controls">
+        <button class="zoom-btn" onclick="zoomMap(1)">+</button>
+        <button class="zoom-btn" onclick="zoomMap(-1)">−</button>
     </div>
 
     <script>
         const {DeckGL, HexagonLayer, TextLayer} = deck;
         let deckgl;
+        
+        // ตัวแปรเก็บค่ามุมมองปัจจุบันของแผนที่
+        let currentViewState = {
+            longitude: 100.9925,
+            latitude: 15.8700,
+            zoom: 5.5,
+            pitch: 50,
+            bearing: 0,
+            minZoom: 4,
+            maxZoom: 15
+        };
 
         const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS5MfesntFAPpBUsYgUtFZaWnDyt4fbZNpKgp5EkHcr-ir3Q_PuV8O3wIjvG5f88Gt_J0YVaQ1fmacL/pub?gid=117754427&single=true&output=csv";
 
@@ -95,17 +152,27 @@
             deckgl = new DeckGL({
                 container: 'map',
                 mapStyle: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-                initialViewState: {
-                    longitude: 100.9925,
-                    latitude: 15.8700,
-                    zoom: 5.5,
-                    pitch: 50,
-                    bearing: 0
+                initialViewState: currentViewState,
+                controller: true, // เปิดให้ใช้เมาส์ลากและหมุนได้อิสระ (กดคลิกขวาค้างเพื่อปรับแกน 3D)
+                onViewStateChange: ({viewState}) => {
+                    currentViewState = viewState; // อัปเดตค่าเสมอเมื่อมีการเลื่อนแผนที่
                 },
-                controller: true,
                 layers: []
             });
             fetchDataFromGoogleSheets();
+        }
+
+        // ฟังก์ชันสำหรับควบคุมปุ่ม Zoom
+        function zoomMap(step) {
+            const newZoom = Math.min(currentViewState.maxZoom, Math.max(currentViewState.minZoom, currentViewState.zoom + step));
+            deckgl.setProps({
+                viewState: {
+                    ...currentViewState,
+                    zoom: newZoom,
+                    transitionDuration: 300 // เพิ่มแอนิเมชันให้การซูมนุ่มนวลขึ้น
+                }
+            });
+            currentViewState.zoom = newZoom;
         }
 
         function fetchDataFromGoogleSheets() {
@@ -120,15 +187,12 @@
             });
         }
 
-        // ฟังก์ชันสร้างจุดกระจายตัวแบบ Gaussian/Radial เพื่อให้เกิด Heatmap Effect ตรงกลาง
         function generateClusterPoints(centerLng, centerLat, evCount, provinceName) {
             const points = [];
-            // ลดสเกลจำนวนจุดลงเพื่อไม่ให้เบราว์เซอร์ทำงานหนักเกินไป (1 จุด = รถ EV 50 คัน)
             const numPoints = Math.min(Math.ceil(evCount / 50), 2000); 
             
             for (let i = 0; i < numPoints; i++) {
                 const angle = Math.random() * Math.PI * 2;
-                // ใช้ Math.random() ยกกำลังเพื่อดึงจุดให้กระจุกตัวตรงกลาง (รัศมีประมาณ 0.3 องศา หรือ ~30km)
                 const radius = Math.pow(Math.random(), 2) * 0.3; 
                 points.push({
                     position: [centerLng + radius * Math.cos(angle), centerLat + radius * Math.sin(angle)],
@@ -140,8 +204,8 @@
 
         function updateMapAndDashboard(data) {
             let totalEV = 0;
-            const originalData = []; // สำหรับ TextLayer และ Dashboard
-            const scatterPoints = []; // สำหรับ HexagonLayer
+            const originalData = []; 
+            const scatterPoints = []; 
 
             data.forEach(row => {
                 const count = parseInt(row.EV_Count);
@@ -152,8 +216,6 @@
                 if (!isNaN(count) && !isNaN(lng) && !isNaN(lat)) {
                     totalEV += count;
                     originalData.push({ province: provinceName, position: [lng, lat], weight: count });
-                    
-                    // สร้างจุดจำลองกระจายรอบๆ เพื่อสร้าง Heatmap
                     const clustered = generateClusterPoints(lng, lat, count, provinceName);
                     scatterPoints.push(...clustered);
                 }
@@ -162,22 +224,24 @@
             document.getElementById('dashboard').style.display = 'block';
             document.getElementById('total-ev').innerText = totalEV.toLocaleString();
 
-            const top5 = [...originalData].sort((a, b) => b.weight - a.weight).slice(0, 5);
-            const top5List = document.getElementById('top5-list');
-            top5List.innerHTML = ''; 
-            top5.forEach((item, index) => {
+            // 3. ปรับดึงข้อมูลเป็น Top 10
+            const top10 = [...originalData].sort((a, b) => b.weight - a.weight).slice(0, 10);
+            const top10List = document.getElementById('top10-list');
+            top10List.innerHTML = ''; 
+            top10.forEach((item, index) => {
                 const li = document.createElement('li');
-                li.innerHTML = `<span>${index + 1}. ${item.province}</span> <strong>${item.weight.toLocaleString()}</strong>`;
-                top5List.appendChild(li);
+                // ไฮไลต์ 3 อันดับแรกให้สีเด่นขึ้นนิดหน่อย
+                const color = index < 3 ? '#00bcd4' : '#fff';
+                li.innerHTML = `<span style="color: ${color};">${index + 1}. ${item.province}</span> <strong>${item.weight.toLocaleString()}</strong>`;
+                top10List.appendChild(li);
             });
 
-            // 1. เลเยอร์ Hexagon (ปรับรัศมีเล็กลงเพื่อให้ดูละเอียดขึ้น)
             const hexLayer = new HexagonLayer({
                 id: 'ev-hexagon-layer',
                 data: scatterPoints,
                 pickable: true,
                 extruded: true,
-                radius: 8000, // ปรับให้เล็กลง (8 กิโลเมตร) 
+                radius: 8000, 
                 elevationScale: 50,
                 getPosition: d => d.position,
                 colorRange: [
@@ -186,7 +250,7 @@
                     [65, 182, 196],
                     [161, 218, 180],
                     [255, 255, 204],
-                    [255, 100, 50] // สียอดแหลมสุด (หนาแน่นสุด)
+                    [255, 100, 50] 
                 ],
                 onHover: ({object, x, y}) => {
                     const tooltip = document.getElementById('tooltip');
@@ -195,7 +259,6 @@
                         tooltip.style.left = x + 'px';
                         tooltip.style.top = y + 'px';
                         const prov = object.points[0].source.province;
-                        // คำนวณความหนาแน่นใน Hexagon ช่องนี้
                         const density = object.points.length * 50; 
                         tooltip.innerHTML = `<strong>พื้นที่จังหวัด ${prov}</strong><br/>ประมาณการในรัศมีนี้: ~${density.toLocaleString()} คัน`;
                     } else {
@@ -204,22 +267,21 @@
                 }
             });
 
-            // 2. เลเยอร์ Text (ป้ายกำกับชื่อจังหวัดและจำนวน)
             const textLayer = new TextLayer({
                 id: 'text-layer',
                 data: originalData,
                 pickable: false,
                 getPosition: d => d.position,
                 getText: d => `${d.province}\n${d.weight.toLocaleString()}`,
-                getSize: 14,
-                getColor: [255, 255, 255, 220],
+                getSize: 15,
+                getColor: [255, 255, 255, 240],
                 getAngle: 0,
                 getTextAnchor: 'middle',
                 getAlignmentBaseline: 'center',
-                fontFamily: 'Tahoma, sans-serif',
+                // 1. นำฟอนต์ Chakra Petch มาใช้กับป้ายชื่อบนแผนที่ด้วย
+                fontFamily: "'Chakra Petch', sans-serif",
                 fontWeight: 'bold',
-                // ดันข้อความให้ลอยขึ้นมาเหนือแผนที่ 3D
-                getPixelOffset: [0, -30] 
+                getPixelOffset: [0, -35] 
             });
 
             deckgl.setProps({ layers: [hexLayer, textLayer] });
