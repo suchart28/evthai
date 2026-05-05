@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EV Registration Map (CSV Upload)</title>
+    
+    <!-- MapLibre & Deck.gl -->
+    <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
+    
+    <!-- PapaParse สำหรับอ่านไฟล์ CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; overflow: hidden; }
+        #map { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* สไตล์กล่องควบคุมและอัปโหลดไฟล์ */
+        .control-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            width: 320px;
+            z-index: 10;
+            backdrop-filter: blur(5px);
+        }
+
+        .upload-btn-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+
+        .upload-btn {
+            border: 2px dashed #1a73e8;
+            color: #1a73e8;
+            background-color: #f8faff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            width: 100%;
+            cursor: pointer;
+            text-align: center;
+            box-sizing: border-box;
+            transition: all 0.3s;
+        }
+        
+        .upload-btn:hover { background-color: #e8f0fe; }
+        .upload-btn-wrapper input[type=file] {
+            font-size: 100px;
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+            height: 100%;
+        }
+
+        .stat-box { background: #333; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px; }
+        .stat-box h3 { margin: 0; font-size: 1.8rem; color: #4CAF50;}
+        .stat-box p { margin: 5px 0 0 0; font-size: 0.9rem; opacity: 0.9; }
+        
+        ul.top-list { list-style: none; padding: 0; margin: 0; }
+        ul.top-list li {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 0.95rem;
+        }
+        ul.top-list li:last-child { border-bottom: none; }
+        
+        #tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+            z-index: 20;
+            transform: translate(-50%, -100%);
+            margin-top: -10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+    <div id="tooltip"></div>
+
+    <div class="control-panel">
+        <h2>อัปเดตข้อมูล EV (CSV)</h2>
+        
+        <div class="upload-btn-wrapper">
+            <button class="upload-btn">📁 เลือกไฟล์ CSV</button>
+            <input type="file" id="csvFileInput" accept=".csv" />
+        </div>
+
+        <div id="dashboard" style="display: none;">
+            <div class="stat-box">
+                <h3 id="total-ev">0</h3>
+                <p>จำนวนรถรวมทั่วประเทศ</p>
+            </div>
+            
+            <h3 style="margin: 10px 0; font-size: 1rem;">Top 5 จังหวัด</h3>
+            <ul class="top-list" id="top5-list"></ul>
+        </div>
+    </div>
+
+    <script>
+        const {DeckGL, HexagonLayer} = deck;
+        let deckgl;
+
+        // เริ่มต้นแผนที่เปล่าๆ
+        function initMap() {
+            deckgl = new DeckGL({
+                container: 'map',
+                mapStyle: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json', // ใช้ธีมมืดให้สี Hexagon โดดเด่นขึ้น
+                initialViewState: {
+                    longitude: 100.9925,
+                    latitude: 15.8700,
+                    zoom: 5.2,
+                    pitch: 45,
+                    bearing: 0
+                },
+                controller: true,
+                layers: []
+            });
+        }
+
+        // ฟังก์ชันรับข้อมูลและวาดแผนที่
+        function updateMapAndDashboard(data) {
+            let totalEV = 0;
+            const mapData = [];
+
+            // ทำความสะอาดและแปลงข้อมูล
+            data.forEach(row => {
+                const count = parseInt(row.EV_Count);
+                const lng = parseFloat(row.Lng);
+                const lat = parseFloat(row.Lat);
+
+                if (!isNaN(count) && !isNaN(lng) && !isNaN(lat)) {
+                    totalEV += count;
+                    mapData.push({
+                        province: row.Province,
+                        position: [lng, lat],
+                        weight: count
+                    });
+                }
+            });
+
+            // อัปเดต Overlay Dashboard
+            document.getElementById('dashboard').style.display = 'block';
+            document.getElementById('total-ev').innerText = totalEV.toLocaleString();
+
+            const top5 = [...mapData].sort((a, b) => b.weight - a.weight).slice(0, 5);
+            const top5List = document.getElementById('top5-list');
+            top5List.innerHTML = ''; // ล้างค่าเดิม
+            top5.forEach((item, index) => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${index + 1}. ${item.province}</span> <strong>${item.weight.toLocaleString()}</strong>`;
+                top5List.appendChild(li);
+            });
+
+            // สร้าง Hexagon Layer ใหม่
+            const hexLayer = new HexagonLayer({
+                id: 'ev-hexagon-layer',
+                data: mapData,
+                pickable: true,
+                extruded: true,
+                radius: 25000, // รัศมีครอบคลุมพื้นที่
+                elevationScale: 100, // ความสูงแท่ง 3D
+                getPosition: d => d.position,
+                getColorWeight: d => d.weight,
+                getElevationWeight: d => d.weight,
+                colorRange: [
+                    [255, 255, 178],
+                    [254, 204, 92],
+                    [253, 141, 60],
+                    [240, 59, 32],
+                    [189, 0, 38]
+                ],
+                onHover: ({object, x, y}) => {
+                    const tooltip = document.getElementById('tooltip');
+                    if (object) {
+                        tooltip.style.display = 'block';
+                        tooltip.style.left = x + 'px';
+                        tooltip.style.top = y + 'px';
+                        tooltip.innerHTML = `<strong>ความหนาแน่น</strong><br/>รถ EV รวม: ${object.colorValue.toLocaleString()} คัน`;
+                    } else {
+                        tooltip.style.display = 'none';
+                    }
+                }
+            });
+
+            // สั่งอัปเดตเลเยอร์บน Deck.gl
+            deckgl.setProps({ layers: [hexLayer] });
+        }
+
+        // ดักจับเหตุการณ์ตอนผู้ใช้อัปโหลดไฟล์
+        document.getElementById('csvFileInput').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // เปลี่ยนข้อความปุ่มเพื่อแสดงสถานะ
+            document.querySelector('.upload-btn').innerText = `อัปเดต: ${file.name}`;
+
+            Papa.parse(file, {
+                header: true, // บอกให้ PapaParse รู้ว่าแถวแรกคือชื่อตัวแปร
+                skipEmptyLines: true,
+                complete: function(results) {
+                    console.log("อ่านไฟล์สำเร็จ:", results.data);
+                    updateMapAndDashboard(results.data);
+                },
+                error: function(err) {
+                    alert("เกิดข้อผิดพลาดในการอ่านไฟล์ CSV");
+                    console.error(err);
+                }
+            });
+        });
+
+        // เรียกใช้งานแผนที่ตอนโหลดเว็บเสร็จ
+        window.onload = initMap;
+
+    </script>
+</body>
+</html>
