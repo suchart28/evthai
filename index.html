@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive Thailand EV Map</title>
+    <title>Interactive Thailand EV Heatmap</title>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,10 +35,10 @@
             border: 1px solid rgba(255,255,255,0.1);
         }
 
-        .control-panel h2 { margin-top: 0; font-size: 1.5rem; color: #4CAF50; font-weight: 600; }
+        .control-panel h2 { margin-top: 0; font-size: 1.5rem; color: #ff9800; font-weight: 600; }
 
         .stat-box { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px; }
-        .stat-box h3 { margin: 0; font-size: 2rem; color: #00bcd4; font-weight: 700;}
+        .stat-box h3 { margin: 0; font-size: 2rem; color: #ffeb3b; font-weight: 700;}
         .stat-box p { margin: 5px 0 0 0; font-size: 1rem; opacity: 0.8; }
         
         ul.top-list { list-style: none; padding: 0; margin: 0; }
@@ -63,8 +63,8 @@
             z-index: 20;
             transform: translate(-50%, -100%);
             margin-top: -15px;
-            border: 1px solid #4CAF50;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            border: 1px solid #ff9800;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
             font-family: 'Chakra Petch', sans-serif;
         }
 
@@ -96,7 +96,7 @@
             backdrop-filter: blur(5px);
             transition: all 0.2s;
         }
-        .zoom-btn:hover { background: #00bcd4; color: #000; border-color: #00bcd4; }
+        .zoom-btn:hover { background: #ff9800; color: #000; border-color: #ff9800; }
     </style>
 </head>
 <body>
@@ -105,7 +105,7 @@
     <div id="tooltip"></div>
 
     <div class="control-panel">
-        <h2>แผนที่ความหนาแน่น EV</h2>
+        <h2>แผนที่ความร้อน EV</h2>
         <div id="loading">⏳ กำลังดึงข้อมูล...</div>
         <div id="dashboard" style="display: none;">
             <div class="stat-box">
@@ -123,14 +123,15 @@
     </div>
 
     <script>
-        const {DeckGL, HexagonLayer, TextLayer} = deck;
+        // เปลี่ยนจาก HexagonLayer เป็น HeatmapLayer และเพิ่ม ScatterplotLayer สำหรับทำ Hover
+        const {DeckGL, HeatmapLayer, TextLayer, ScatterplotLayer} = deck;
         let deckgl;
         
         let currentViewState = {
             longitude: 100.9925,
             latitude: 15.8700,
             zoom: 5.5,
-            pitch: 0, // เปลี่ยนมุมมองเป็น 0 องศา (มองจากด้านบนตรงๆ) เพื่อให้เห็นสีชัดเจน
+            pitch: 0, 
             bearing: 0,
             minZoom: 4,
             maxZoom: 15
@@ -218,60 +219,74 @@
             top10List.innerHTML = ''; 
             top10.forEach((item, index) => {
                 const li = document.createElement('li');
-                const color = index < 3 ? '#00bcd4' : '#fff';
+                const color = index < 3 ? '#ffeb3b' : '#fff';
                 li.innerHTML = `<span style="color: ${color};">${index + 1}. ${item.province}</span> <strong>${item.weight.toLocaleString()}</strong>`;
                 top10List.appendChild(li);
             });
 
-            const hexLayer = new HexagonLayer({
-                id: 'ev-hexagon-layer',
+            // 1. เลเยอร์ Heatmap หลัก
+            const heatmapLayer = new HeatmapLayer({
+                id: 'ev-heatmap-layer',
                 data: scatterPoints,
-                pickable: true,
-                extruded: false, // ปิดการตั้งค่า 3D (ทำให้เป็นช่องราบไปกับพื้น)
-                radius: 8000, 
                 getPosition: d => d.position,
-                // ชุดสีไล่ระดับตามความเข้ม (จากอ่อนไปเข้มจัด)
+                getWeight: d => 1,
+                radiusPixels: 40, // รัศมีความเบลอของขอบเขตความร้อน
+                intensity: 1.2,   // ความสว่างของจุดศูนย์กลาง
+                threshold: 0.03,
                 colorRange: [
-                    [237, 248, 251], // สีน้อยสุด (ฟ้าอมเขียวอ่อน)
-                    [178, 226, 226],
-                    [102, 194, 164],
-                    [44, 162, 95],
-                    [0, 109, 44],
-                    [0, 50, 20]      // สีมากสุด (เขียวเข้มจัด)
-                ],
+                    [25, 25, 112, 100],   // น้ำเงิน (หนาแน่นน้อย)
+                    [0, 191, 255, 200],   // ฟ้า
+                    [50, 205, 50, 255],   // เขียว
+                    [255, 215, 0, 255],   // เหลือง
+                    [255, 69, 0, 255],    // ส้มแดง
+                    [220, 20, 60, 255]    // แดงเข้ม (หนาแน่นสูงมาก)
+                ]
+            });
+
+            // 2. เลเยอร์โปร่งใสสำหรับรับ Event การชี้เมาส์ (Hover)
+            const hitAreaLayer = new ScatterplotLayer({
+                id: 'hit-area-layer',
+                data: originalData,
+                pickable: true,
+                opacity: 0, // โปร่งใส 100% มองไม่เห็นแต่สัมผัสได้
+                stroked: false,
+                filled: true,
+                radiusScale: 1,
+                radiusMinPixels: 25, // ขนาดพื้นที่รับสัมผัสเมาส์รอบตัวอักษร
+                getPosition: d => d.position,
                 onHover: ({object, x, y}) => {
                     const tooltip = document.getElementById('tooltip');
-                    if (object && object.points && object.points.length > 0) {
+                    if (object) {
                         tooltip.style.display = 'block';
                         tooltip.style.left = x + 'px';
                         tooltip.style.top = y + 'px';
-                        const prov = object.points[0].province;
-                        const density = object.points.length * 50; 
-                        tooltip.innerHTML = `<strong>พื้นที่จังหวัด ${prov}</strong><br/>ประมาณการในรัศมีนี้: ~${density.toLocaleString()} คัน`;
+                        tooltip.innerHTML = `<strong>จังหวัด${object.province}</strong><br/>รถ EV: ${object.weight.toLocaleString()} คัน`;
                     } else {
                         tooltip.style.display = 'none';
                     }
                 }
             });
 
+            // 3. เลเยอร์ป้ายชื่อจังหวัดและตัวเลข
             const textLayer = new TextLayer({
                 id: 'text-layer',
                 data: originalData,
-                pickable: false,
+                pickable: false, // ปิดการสัมผัสที่ตัวอักษรโดยตรง (ให้ hitAreaLayer จัดการแทน)
                 getPosition: d => d.position,
                 getText: d => `${d.province}\n${d.weight.toLocaleString()}`,
-                getSize: 15,
-                getColor: [255, 255, 255, 255], // ปรับสีป้ายชื่อให้ขาวสว่างสุด
+                getSize: 14,
+                getColor: [255, 255, 255, 255],
                 getAngle: 0,
                 getTextAnchor: 'middle',
                 getAlignmentBaseline: 'center',
                 fontFamily: "'Chakra Petch', sans-serif",
                 fontWeight: 'bold',
-                getPixelOffset: [0, 0], // ดึงป้ายชื่อลงมาติดกับพื้นแผนที่
+                getPixelOffset: [0, 0],
                 characterSet: 'auto'
             });
 
-            deckgl.setProps({ layers: [hexLayer, textLayer] });
+            // แสดงผลทั้ง 3 เลเยอร์ทับซ้อนกัน
+            deckgl.setProps({ layers: [heatmapLayer, hitAreaLayer, textLayer] });
         }
 
         window.onload = initMap;
